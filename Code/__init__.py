@@ -3,7 +3,7 @@ import eg
 eg.RegisterPlugin(
     name="Marantz M-CR511",
     author="Kevin Smith",
-    version="0.0.4",
+    version="0.0.7",
     kind="other",
     description="Control the Marantz M-CR511 amplifier via the TCP/IP control protocol"
 )
@@ -43,14 +43,15 @@ class Amp(eg.PluginBase):
         group_Vol.AddAction(NightMode)
         group_Vol.AddAction(NextAudioMode)
         group_Vol.AddAction(NightModeIfNoStadiumMode)
+        group_Vol.AddAction(SwitchBetweenNormalAndNightAudioMode)
 
         group_Other = self.AddGroup("Other", "Other Stuff")
         group_Other.AddAction(PrintCurrentParameters)
+        group_Other.AddAction(Favourite)
 
 
 
-
-        #commands
+        #available commands
         #TODO: Try out Favourites and request Favourites List
         self.commands = [
             ('PWON', "Power On"),
@@ -134,9 +135,11 @@ class Amp(eg.PluginBase):
             "DynamicBassBoost": None,
             "Sleep": None,
             "AudioMode": None,   # 0 is Normal, 1 is Night, 2 is Stadium
-            "ConnectStatus": 0,
-            "pluginMute": 0
+            "ConnectStatus": 0
         }
+
+        # a dictionary for values which cannot be set at the moment of the command, because the amplifier is switched off
+        self.remember = {}
 
         self.start_connection()
 
@@ -154,7 +157,6 @@ class Amp(eg.PluginBase):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.settimeout(10)
         self.sockLock = RLock()
-        self.status_variables["pluginMute"] = 0
 
         #connect to the amplifier
         #TODO: have the IP address as an input parameter
@@ -183,21 +185,21 @@ class Amp(eg.PluginBase):
         self.status_variables["ConnectStatus"] = 0
         print "done"
 
-    def Configure(self, myString_test="", TimerTimeStart="0730", TimerTimeEnd="0740"):
+    def Configure(self, myString_test="", IP_str="192.168.1.197", TimerTimeEnd="0740"):
         panel = eg.ConfigPanel()
         textControl = wx.TextCtrl(panel, -1, myString_test)
-        panel.sizer.Add(textControl, 1, wx.EXPAND)
-
-        textControl2 = wx.TextCtrl(panel, -1, TimerTimeStart)
-        panel.sizer.Add(textControl2, 1, wx.EXPAND)
-
+        IP_str_Control2 = wx.TextCtrl(panel, -1, IP_str)
         textControl3 = wx.TextCtrl(panel, -1, TimerTimeEnd)
-        panel.sizer.Add(textControl3, 1, wx.EXPAND)
+
+        panel.AddLine("Starting string ",textControl)
+        panel.AddLine("IP address: ",IP_str_Control2)
+        panel.AddLine("Text field 3: ",textControl3)
 
         while panel.Affirmed():
-            panel.SetResult(textControl.GetValue())
-            panel.SetResult(textControl2.GetValue())
-            panel.SetResult(textControl3.GetValue())
+            panel.SetResult(textControl.GetValue(),
+                IP_str_Control2.GetValue(),
+                textControl3.GetValue()
+            )
 
     def ThreadLoop(self, stopThreadEvent):
         while not stopThreadEvent.isSet():
@@ -265,6 +267,8 @@ class Amp(eg.PluginBase):
         elif msg.startswith("PW"):
             if msg == "PWON":
                 self.status_variables["Power"] = True
+                if len(self.remember) > 0:
+                    self.execute_remembered_values()
             elif msg == "PWSTANDBY":
                 self.status_variables["Power"] = False
             #trigger Event
@@ -290,11 +294,11 @@ class Amp(eg.PluginBase):
 
         elif msg.startswith("PS"):
             if msg.startswith("PSTRE"):
-                self.status_variables["Treble"] = int(msg[5:7])
+                self.status_variables["Treble"] = int(msg[6:8])
             elif msg.startswith("PSBAS"):
-                self.status_variables["Bass"] = int(msg[5:7])
+                self.status_variables["Bass"] = int(msg[6:8])
             elif msg.startswith("PSBAL"):
-                self.status_variables["Balance"] = int(msg[5:7])
+                self.status_variables["Balance"] = int(msg[6:8])
             elif msg.startswith("PSSDB"):
                 if msg == "PSSDB ON":
                     self.status_variables["DynamicBassBoost"] = True
@@ -314,6 +318,13 @@ class Amp(eg.PluginBase):
             #trigger Event
             self.TriggerEvent("SLP", payload=str(self.status_variables["Sleep"]))
 
+    def execute_remembered_values(self):
+        if "AudioMode" in self.remember:
+            self.activateAudioMode(self.remember["AudioMode"])
+            self.remember.pop("AudioMode", None)
+        if len(self.remember) > 0:
+            print "there are remembered values which have not been executed"
+
     def request_status_variables_update(self):
         #TODO: Check how large the buffer is (and how it interacts with the 1024 recv length). Maybe need to do a sockLock pause
         with self.sockLock:
@@ -330,31 +341,37 @@ class Amp(eg.PluginBase):
             self.sock.sendall(b'TS?\r') #TODO: Check Timer request command
 
     def activateAudioMode(self, mode):
-        if mode == 0:   #normal
-            with self.sockLock:
-                self.sock.sendall(b'PSSDI ON\r')
-                self.sock.sendall(b'SSDIM100\r')
-                self.sock.sendall(b'PSBAS 50\r')
-                self.sock.sendall(b'PSTRE 50\r')
-                self.sock.sendall(b'PSBAL 50\r')
-                self.sock.sendall(b'PSSDB OFF\r')
-            self.status_variables["AudioMode"] = 0
+        #first check whether the AudioMode is already active. If yes, then nothing has to be done
+        if not (self.status_variables["AudioMode"] == mode):
+            #check if the Power is On, if not, then we cannot change the Audio Mode. In this case, we remember, that we need to set it as soon as the amplifier is switched on again.
+            if not self.status_variables["Power"]:
+                self.remember["AudioMode"] = mode
+            else:
+                if mode == 0:   #normal
+                    with self.sockLock:
+                        self.sock.sendall(b'PSSDI ON\r')
+                        self.sock.sendall(b'SSDIM100\r')
+                        self.sock.sendall(b'PSBAS 50\r')
+                        self.sock.sendall(b'PSTRE 50\r')
+                        self.sock.sendall(b'PSBAL 50\r')
+                        self.sock.sendall(b'PSSDB OFF\r')
+                    self.status_variables["AudioMode"] = 0
 
-        elif mode == 1:     #night
-            with self.sockLock:
-                self.sock.sendall(b'PSSDI OFF\r')
-                self.sock.sendall(b'PSBAS 40\r')
-                self.sock.sendall(b'PSTRE 52\r')
-                self.sock.sendall(b'SSDIM050\r')
-            self.status_variables["AudioMode"] = 1
+                elif mode == 1:     #night
+                    with self.sockLock:
+                        self.sock.sendall(b'PSSDI OFF\r')
+                        self.sock.sendall(b'PSBAS 40\r')
+                        self.sock.sendall(b'PSTRE 52\r')
+                        self.sock.sendall(b'SSDIM050\r')
+                    self.status_variables["AudioMode"] = 1
 
-        elif mode == 2:     #stadium
-            with self.sockLock:
-                self.sock.sendall(b'PSSDI OFF\r')
-                self.sock.sendall(b'PSBAS 52\r')
-                self.sock.sendall(b'PSTRE 58\r')
-                self.sock.sendall(b'SSDIM050\r')
-            self.status_variables["AudioMode"] = 2
+                elif mode == 2:     #stadium
+                    with self.sockLock:
+                        self.sock.sendall(b'PSSDI OFF\r')
+                        self.sock.sendall(b'PSBAS 52\r')
+                        self.sock.sendall(b'PSTRE 58\r')
+                        self.sock.sendall(b'SSDIM050\r')
+                    self.status_variables["AudioMode"] = 2
 
         #trigger Event
         self.TriggerEvent("AudioMode", payload=str(self.status_variables["AudioMode"]))
@@ -367,14 +384,9 @@ class Amp(eg.PluginBase):
             self.activateAudioMode(newAudioMode)
 
     def sendCommand(self, cmd):
-        # pluginMute means that the plugin is muted (currently switched off). Should be switched on, when
-        # Bluetooth speaker is used
-        if not self.status_variables["pluginMute"]:
-            with self.sockLock:
-                self.sock.sendall(cmd)
+        with self.sockLock:
+            self.sock.sendall(cmd)
 
-    def changePluginMuteStatus(self):
-        self.status_variables["pluginMute"] = (self.status_variables["pluginMute"] + 1) % 2
 
 ###########
 ## Actions
@@ -400,8 +412,9 @@ class DisconnectFromAmp(eg.ActionBase):
 class PowerOn(eg.ActionBase):
     def __call__(self):
         if not self.plugin.status_variables["Power"]:
-            self.plugin.sendCommand(b'PWON\r')
-            sleep(1)
+            with self.plugin.sockLock:
+                self.plugin.sendCommand(b'PWON\r')
+                sleep(3)
 
 
 class PowerOff(eg.ActionBase):
@@ -453,6 +466,14 @@ class NextAudioMode(eg.ActionBase):
         self.plugin.switchToNextAudioMode()
 
 
+class SwitchBetweenNormalAndNightAudioMode(eg.ActionBase):
+    def __call__(self):
+        if self.plugin.status_variables["AudioMode"] == 0:
+            self.plugin.activateAudioMode(1)
+        else:
+            self.plugin.activateAudioMode(0)
+
+
 class NightModeIfNoStadiumMode(eg.ActionBase):
     def __call__(self):
         if self.plugin.status_variables["AudioMode"] != 2:
@@ -475,6 +496,26 @@ class TimerOff(eg.ActionBase):
 class Clock(eg.ActionBase):
     def __call__(self):
         self.plugin.sendCommand(b'CLK\r')
+
+
+#
+# Favourites
+#
+class Favourite(eg.ActionBase):
+    name = "Go to Favourite"
+    description = "Go to a specified Favourite"
+
+    def __call__(self, favouriteNb):
+        cmd_str = b'FV %02d\r' %favouriteNb
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, favouriteNb=1):
+        panel = eg.ConfigPanel()
+        favouriteNbCtrl = panel.SpinIntCtrl(favouriteNb, max=50)
+        panel.AddLine("Favourite Number:", favouriteNbCtrl)
+        while panel.Affirmed():
+            panel.SetResult(favouriteNbCtrl.GetValue())
+
 
 
 #
