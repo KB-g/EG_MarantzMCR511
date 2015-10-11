@@ -3,7 +3,7 @@ import eg
 eg.RegisterPlugin(
     name="Marantz M-CR511",
     author="Kevin Smith",
-    version="0.0.7",
+    version="0.0.9",
     kind="other",
     description="Control the Marantz M-CR511 amplifier via the TCP/IP control protocol"
 )
@@ -36,6 +36,7 @@ class Amp(eg.PluginBase):
         group_Power.AddAction(MakeAmpReadyForMP)
 
         group_Vol = self.AddGroup("Volume", "Actions regarding the Volume")
+        group_Vol.AddAction(setVolumeTo)
         group_Vol.AddAction(VolUp)
         group_Vol.AddAction(VolDown)
         group_Vol.AddAction(NormalMode)
@@ -45,9 +46,11 @@ class Amp(eg.PluginBase):
         group_Vol.AddAction(NightModeIfNoStadiumMode)
         group_Vol.AddAction(SwitchBetweenNormalAndNightAudioMode)
 
-        group_Other = self.AddGroup("Other", "Other Stuff")
+        group_Other = self.AddGroup("Other", "Other Stuff like Reading the display, calling Favourites, setting the display's brightness, etc.")
         group_Other.AddAction(PrintCurrentParameters)
+        group_Other.AddAction(ReadAmpDisplay)
         group_Other.AddAction(Favourite)
+        group_Other.AddAction(setDisplayBrightness)
 
 
 
@@ -135,7 +138,8 @@ class Amp(eg.PluginBase):
             "DynamicBassBoost": None,
             "Sleep": None,
             "AudioMode": None,   # 0 is Normal, 1 is Night, 2 is Stadium
-            "ConnectStatus": 0
+            "ConnectStatus": 0,
+            "Display": [""]*9
         }
 
         # a dictionary for values which cannot be set at the moment of the command, because the amplifier is switched off
@@ -227,6 +231,8 @@ class Amp(eg.PluginBase):
 
     #define a function to handle responses
     def receive_responses(self, exp_nb_responses=1):
+        #TODO: maybe I should get rid of this function. Is it really needed? (Currently not in use)
+
         #try four times (last try has to be after some time t>200milliseconds)
         #after exp_nb_responses or more responses the cycle breaks
         n_responses = 0
@@ -251,10 +257,10 @@ class Amp(eg.PluginBase):
 
         if msg.startswith("MVVOA"):
             self.status_variables["Volume"] = int(msg[5:7])
-            self.TriggerEvent("Vol.", payload=str(self.status_variables["Volume"]))
+            self.TriggerEvent("Vol", payload=str(self.status_variables["Volume"]))
         elif msg.startswith("MV"):
             self.status_variables["Volume"] = int(msg[2:4])
-            self.TriggerEvent("Vol.", payload=str(self.status_variables["Volume"]))
+            self.TriggerEvent("Vol", payload=str(self.status_variables["Volume"]))
 
         elif msg.startswith("MU"):
             if msg == "MUON":
@@ -262,7 +268,7 @@ class Amp(eg.PluginBase):
             elif msg == "MUOFF":
                 self.status_variables["Mute"] = False
             #trigger Event
-            self.TriggerEvent("Mute.", payload=str(self.status_variables["Mute"]))
+            self.TriggerEvent("Mute", payload=str(self.status_variables["Mute"]))
 
         elif msg.startswith("PW"):
             if msg == "PWON":
@@ -318,6 +324,9 @@ class Amp(eg.PluginBase):
             #trigger Event
             self.TriggerEvent("SLP", payload=str(self.status_variables["Sleep"]))
 
+        elif msg.startswith("NSE"):
+            self.status_variables["Display"][int(msg[3:4])] = msg[4:len(msg)]
+
     def execute_remembered_values(self):
         if "AudioMode" in self.remember:
             self.activateAudioMode(self.remember["AudioMode"])
@@ -339,6 +348,7 @@ class Amp(eg.PluginBase):
             self.sock.sendall(b'PSSDB ?\r')
             self.sock.sendall(b'SLP?\r')
             self.sock.sendall(b'TS?\r') #TODO: Check Timer request command
+            self.sock.sendall(b'NSE\r')
 
     def activateAudioMode(self, mode):
         #first check whether the AudioMode is already active. If yes, then nothing has to be done
@@ -346,6 +356,8 @@ class Amp(eg.PluginBase):
             #check if the Power is On, if not, then we cannot change the Audio Mode. In this case, we remember, that we need to set it as soon as the amplifier is switched on again.
             if not self.status_variables["Power"]:
                 self.remember["AudioMode"] = mode
+                #trigger Event
+                self.TriggerEvent("AudioMode", payload="R"+str(mode))
             else:
                 if mode == 0:   #normal
                     with self.sockLock:
@@ -373,8 +385,8 @@ class Amp(eg.PluginBase):
                         self.sock.sendall(b'SSDIM050\r')
                     self.status_variables["AudioMode"] = 2
 
-        #trigger Event
-        self.TriggerEvent("AudioMode", payload=str(self.status_variables["AudioMode"]))
+                #trigger Event
+                self.TriggerEvent("AudioMode", payload=str(self.status_variables["AudioMode"]))
 
     def switchToNextAudioMode(self):
         if self.status_variables["AudioMode"] is None:
@@ -436,6 +448,22 @@ class MakeAmpReadyForMP(eg.ActionBase):
 #
 # Volume & Tone Actions
 #
+class setVolumeTo(eg.ActionBase):
+    name = "Set Volume Level"
+    description = "Set the volume level to a specified value"
+    def __call__(self, VolumeLevel):
+        cmd_str = b'MV%02d\r' %VolumeLevel
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, VolumeLevel=10):
+        panel = eg.ConfigPanel()
+        VolumeLevelCtrl = panel.SpinIntCtrl(VolumeLevel, max=60)
+        panel.AddLine("Volume Level: ", VolumeLevelCtrl)
+        while panel.Affirmed():
+            panel.SetResult(VolumeLevelCtrl.GetValue())
+
+
+
 class VolUp(eg.ActionBase):
     def __call__(self):
         self.plugin.sendCommand(b'MVUP\r')
@@ -523,20 +551,35 @@ class Favourite(eg.ActionBase):
 #
 class ReadAmpDisplay(eg.ActionBase):
     def __call__(self):
-        with self.plugin.sockLock:
-            self.plugin.sendCommand(b'SI?\r')
-            self.plugin.sendCommand(b'NSE\r')
-            self.receive_responses(10)
-            #TODO: add to action group
-
+        self.plugin.sendCommand(b'NSE\r')
+        self.plugin.TriggerEvent("Display", payload="Input: " + self.plugin.status_variables["Input"])
+        sleep(1)
+        for line in self.plugin.status_variables["Display"]:
+            if line:
+                self.plugin.TriggerEvent("Display", payload=line)
+                sleep(1)
 
 class PrintCurrentParameters(eg.ActionBase):
     def __call__(self):
         for variable in self.plugin.status_variables:
             print variable, ": ", self.plugin.status_variables[variable]
 
+class setDisplayBrightness(eg.ActionBase):
+    name = "Set Display Brithness"
+    description = "Set the brightness of the display to a specified value"
 
-#TODO: read out the lines on Amplifier (esp for when Spotify/Bluetooth is playing)
+    def __call__(self, brightness_pct):
+        cmd_str = b'SSDIM%03d\r' %brightness_pct
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, brightness_pct=100):
+        panel = eg.ConfigPanel()
+        brightness_pctCtrl = panel.SpinIntCtrl(brightness_pct, max=100)
+        panel.AddLine("Brightness in percent:", brightness_pctCtrl, "%")
+        while panel.Affirmed():
+            panel.SetResult(brightness_pctCtrl.GetValue())
+
+
 
 #TODO: another thread which checks the connection to the amp every hour or so. If it is broken, then restart connection
 
