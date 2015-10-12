@@ -35,7 +35,7 @@ eg.RegisterPlugin(
 import socket
 from select import select
 from threading import Event, Thread, RLock
-from time import sleep, clock
+from time import sleep, time
 
 
 class Amp(eg.PluginBase):
@@ -348,6 +348,7 @@ class Amp(eg.PluginBase):
             if msg == "PWON":
                 self.status_variables["Power"] = True
                 if len(self.remember) > 0:
+                    sleep(4)
                     self.execute_remembered_values()
             elif msg == "PWSTANDBY":
                 self.status_variables["Power"] = False
@@ -513,7 +514,7 @@ class PowerOff(eg.ActionBase):
     def __call__(self):
         if self.plugin.status_variables["Power"]:
             self.plugin.sendCommand(b'PWOFF\r')
-            sleep(2)
+            sleep(5)
 
 
 class MakeAmpReadyForMP(eg.ActionBase):
