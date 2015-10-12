@@ -1,13 +1,35 @@
+
+# This file is part of an Eventghost plugin to control the Marantz M-CR511 amplifier.
+# This plugin was developed by using the specification of the
+# TCP/IP control protocol of the Marantz M-CR511 Receiver. Marantz
+# was not involved in developing this plugin.
+# Copyright (C) 2015  Kevin Smith <smith.kb@hotmail.com>
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
+# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+
 import eg
 
 eg.RegisterPlugin(
     name="Marantz M-CR511",
     author="Kevin Smith",
     version="0.0.12",
-    kind="other",
-    description="Control the Marantz M-CR511 amplifier via the TCP/IP control protocol"
+    kind="external",
+    description='Control the Marantz M-CR511/611 amplifier via the TCP/IP control protocol. \n \n \
+    The plugin should also work for the previous model M-CR510/610, as well as other amplifiers \n \
+    using the same or very similar TCP/IP control protocol (as many Marantz & Denon amplifiers/receivers do).'
 )
-
 
 # import
 import socket
@@ -766,3 +788,4 @@ class setDisplayBrightness(eg.ActionBase):
 #### general todos or notes #####
 #TODO: another thread which checks the connection to the amp every hour or so. If it is broken, then restart connection
 #TODO: instead of having string in the status_variables dict, use global variables (like INPUT_DIGITALIN = 1) and only use the strings for output
+#TODO: new action which increases the volume in percentage terms (e.g. reduce by 30%) --> useful for phone calls or similar
