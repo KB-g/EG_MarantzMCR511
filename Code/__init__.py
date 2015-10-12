@@ -3,17 +3,17 @@ import eg
 eg.RegisterPlugin(
     name="Marantz M-CR511",
     author="Kevin Smith",
-    version="0.0.9",
+    version="0.0.12",
     kind="other",
     description="Control the Marantz M-CR511 amplifier via the TCP/IP control protocol"
 )
 
 
-#import the other modules
+#import
 import socket
 from select import select
 from threading import Event, Thread, RLock
-from time import sleep
+from time import sleep, clock
 
 
 class Amp(eg.PluginBase):
@@ -51,7 +51,6 @@ class Amp(eg.PluginBase):
         group_Other.AddAction(ReadAmpDisplay)
         group_Other.AddAction(Favourite)
         group_Other.AddAction(setDisplayBrightness)
-
 
 
         #available commands
@@ -122,9 +121,13 @@ class Amp(eg.PluginBase):
         ]
         self.commands_strings = [entry[0] for entry in self.commands]
 
-    def __start__(self, myString_test):
+    def __start__(self, myString_test, IP_str):
         print "starting" + myString_test
 
+        #set the configuration variables
+        self.HOST = IP_str
+
+        #initiate the dict for the status variables
         self.status_variables = {
             "Power": None,
             "Input": "N/A",
@@ -163,10 +166,8 @@ class Amp(eg.PluginBase):
         self.sockLock = RLock()
 
         #connect to the amplifier
-        #TODO: have the IP address as an input parameter
-        host = "192.168.1.197"
         port = 23
-        self.sock.connect((host, port))
+        self.sock.connect((self.HOST, port))
 
         # Start the Thread for Receiving
         self.stopThreadEvent = Event()
@@ -189,20 +190,17 @@ class Amp(eg.PluginBase):
         self.status_variables["ConnectStatus"] = 0
         print "done"
 
-    def Configure(self, myString_test="", IP_str="192.168.1.197", TimerTimeEnd="0740"):
+    def Configure(self, myString_test="", IP_str="192.168.1.197"):
         panel = eg.ConfigPanel()
         textControl = wx.TextCtrl(panel, -1, myString_test)
         IP_str_Control2 = wx.TextCtrl(panel, -1, IP_str)
-        textControl3 = wx.TextCtrl(panel, -1, TimerTimeEnd)
 
         panel.AddLine("Starting string ",textControl)
-        panel.AddLine("IP address: ",IP_str_Control2)
-        panel.AddLine("Text field 3: ",textControl3)
+        panel.AddLine("IP address of Amplifier: ",IP_str_Control2)
 
         while panel.Affirmed():
             panel.SetResult(textControl.GetValue(),
-                IP_str_Control2.GetValue(),
-                textControl3.GetValue()
+                IP_str_Control2.GetValue()
             )
 
     def ThreadLoop(self, stopThreadEvent):
@@ -422,6 +420,9 @@ class DisconnectFromAmp(eg.ActionBase):
 # Power
 #
 class PowerOn(eg.ActionBase):
+    name = "Power On"
+    description = "Switch the amplifier on. (There is a 3sec wait after it to ensure the amplifier is ready to receive new commands)"
+
     def __call__(self):
         if not self.plugin.status_variables["Power"]:
             with self.plugin.sockLock:
@@ -430,6 +431,9 @@ class PowerOn(eg.ActionBase):
 
 
 class PowerOff(eg.ActionBase):
+    name = "Power Off"
+    description = "Switch the amplifier off"
+
     def __call__(self):
         if self.plugin.status_variables["Power"]:
             self.plugin.sendCommand(b'PWOFF\r')
@@ -465,26 +469,36 @@ class setVolumeTo(eg.ActionBase):
 
 
 class VolUp(eg.ActionBase):
+    name = "Volume up"
+    description = "Increase volume by one step"
     def __call__(self):
         self.plugin.sendCommand(b'MVUP\r')
 
 
 class VolDown(eg.ActionBase):
+    name = "Volume down"
+    description = "Decrease volume by one step"
     def __call__(self):
         self.plugin.sendCommand(b'MVDOWN\r')
 
 
 class NormalMode(eg.ActionBase):
+    name = "Normal AudioMode"
+    description = "Source Direct Input = True, Bass & Treble = default"
     def __call__(self):
         self.plugin.activateAudioMode(0)
 
 
 class NightMode(eg.ActionBase):
+    name = "Night AudioMode"
+    description = "cut bass out"
     def __call__(self):
         self.plugin.activateAudioMode(1)
 
 
 class StadiumMode(eg.ActionBase):
+    name = "Stadium AudioMode"
+    description = "push bass and treble"
     def __call__(self):
         self.plugin.activateAudioMode(2)
 
@@ -512,13 +526,83 @@ class NightModeIfNoStadiumMode(eg.ActionBase):
 # Timer & Clock
 #
 class TimerOn(eg.ActionBase):
-    def __call__(self):
-        self.plugin.sendCommand(b'TSEVERY A0730-A0735 FA01 09 1\r')
+    name = "Timer On"
+    description = "Configure the timer and switch it on. Either once or every day."
+
+    def __call__(self, start_h, start_min, end_h, end_min, vol, favouriteNb, timer_type):
+
+        if timer_type == 0:
+            timer_type_cmd = "ONCE"
+        else:
+            timer_type_cmd = "EVERY"
+
+        if start_h > 11:
+            start_h -= 12
+            start_am_pm = "P"
+        else:
+            start_am_pm = "A"
+
+        if end_h > 11:
+            end_h -= 12
+            end_am_pm = "P"
+        else:
+            end_am_pm = "A"
+
+        cmd_str = b'TS%s %s%02d%02d-%s%02d%02d FA%02d %02d 1\r' % (timer_type_cmd,
+                                                                   start_am_pm, start_h, start_min,
+                                                                   end_am_pm, end_h, end_min,
+                                                                   favouriteNb,
+                                                                   vol)
+        print cmd_str
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, start_h=7, start_min=30, end_h=7, end_min=45, vol=10, favouriteNb=1, timer_type=0):
+        panel = eg.ConfigPanel()
+        start_h_Ctrl = panel.SpinIntCtrl(start_h, max=23)
+        start_min_Ctrl = panel.SpinIntCtrl(start_min, max=59)
+        end_h_Ctrl = panel.SpinIntCtrl(end_h, max=23)
+        end_min_Ctrl = panel.SpinIntCtrl(end_min, max=59)
+        vol_Ctrl = panel.SpinIntCtrl(vol, max=60)
+        favouriteNb_Ctrl = panel.SpinIntCtrl(favouriteNb, max=50)
+        timer_typeCtrl = panel.Choice(timer_type, choices=("once", "every day"))
+
+        panel.AddLine("Timer Type: ", timer_typeCtrl)
+        panel.AddLine("Start time: ", start_h_Ctrl, "h", start_min_Ctrl, "min")
+        panel.AddLine("End time: ", end_h_Ctrl, "h", end_min_Ctrl, "min")
+        panel.AddLine("Volume level: ", vol_Ctrl)
+        panel.AddLine("Favourite Number to call: ", favouriteNb_Ctrl)
+
+        while panel.Affirmed():
+            panel.SetResult(start_h_Ctrl.GetValue(),
+                start_min_Ctrl.GetValue(),
+                end_h_Ctrl.GetValue(),
+                end_min_Ctrl.GetValue(),
+                vol_Ctrl.GetValue(),
+                favouriteNb_Ctrl.GetValue(),
+                timer_typeCtrl.GetValue()
+            )
 
 
 class TimerOff(eg.ActionBase):
-    def __call__(self):
-        self.plugin.sendCommand(b'TSEVERY A0730-A0735 FA01 09 0\r')
+    name = "Timer Off"
+    description = "Switch either the 'every day'- or 'once' timer off"
+
+    def __call__(self, timer_type):
+        if timer_type == 0:
+            timer_type_cmd = "ONCE"
+        else:
+            timer_type_cmd = "EVERY"
+
+        cmd_str = b'TS%s A0730-A0735 FA01 09 0\r' % timer_type_cmd
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, timer_type=0):
+        panel = eg.ConfigPanel()
+        timer_typeCtrl = panel.Choice(timer_type, choices=("once", "every day"))
+        panel.AddLine("Timer Type to switch off: ", timer_typeCtrl)
+
+        while panel.Affirmed():
+            panel.SetResult(timer_typeCtrl.GetValue())
 
 
 class Clock(eg.ActionBase):
@@ -547,22 +631,36 @@ class Favourite(eg.ActionBase):
 
 
 #
-# Read out Information
+# Read Amp's Display
 #
 class ReadAmpDisplay(eg.ActionBase):
     def __call__(self):
         self.plugin.sendCommand(b'NSE\r')
-        self.plugin.TriggerEvent("Display", payload="Input: " + self.plugin.status_variables["Input"])
         sleep(1)
-        for line in self.plugin.status_variables["Display"]:
-            if line:
-                self.plugin.TriggerEvent("Display", payload=line)
-                sleep(1)
+
+        if self.plugin.status_variables["Input"] == "MP Lounge":
+            display_output = "Input: MP Lounge"
+        else:
+            display_output_list = [line.strip() for line in self.plugin.status_variables["Display"] if (line.strip())]
+
+            if not self.plugin.status_variables["Input"] == "Internet Radio":
+                if display_output_list[0] == "Now Playing":
+                    display_output_list[2] = display_output_list[2] + " - " + display_output_list[1]
+                    display_output_list = display_output_list[2:len(display_output_list)]
+
+            display_output = ""
+            for line in display_output_list:
+                display_output += line + "\n"
+            display_output = display_output[0:len(display_output)-1] #remove the last "\n"
+
+        self.plugin.TriggerEvent("Display", payload=display_output)
+
 
 class PrintCurrentParameters(eg.ActionBase):
     def __call__(self):
         for variable in self.plugin.status_variables:
             print variable, ": ", self.plugin.status_variables[variable]
+
 
 class setDisplayBrightness(eg.ActionBase):
     name = "Set Display Brithness"
@@ -580,6 +678,30 @@ class setDisplayBrightness(eg.ActionBase):
             panel.SetResult(brightness_pctCtrl.GetValue())
 
 
+# class testing(eg.ActionBase):
+#     def __call__(self, method, port):
+#         print method, " ", port
+#
+#     # def Configure(self, universalMods = True):
+#     #     panel = eg.ConfigPanel()
+#     #     universalModsCtrl = panel.CheckBox(universalMods, "checking")
+#     #     #panel.sizer.Add(universalModsCtrl, 0, wx.ALL, 20)
+#     #     panel.AddLine("test", universalModsCtrl)
+#     #     while panel.Affirmed():
+#     #         panel.SetResult(universalModsCtrl.GetValue())
+#
+#     def Configure(self, method=0):
+#
+#         panel = eg.ConfigPanel(self)
+#         methodCtrl = panel.Choice(method, choices=("Via MarantzControl", "Directly to serial port"))
+#         panel.AddLine("Method:", methodCtrl)
+#
+#         while panel.Affirmed():
+#             panel.SetResult(methodCtrl.GetValue())
 
+
+
+
+#### general todos or notes #####
 #TODO: another thread which checks the connection to the amp every hour or so. If it is broken, then restart connection
 
