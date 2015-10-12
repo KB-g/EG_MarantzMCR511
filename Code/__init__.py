@@ -9,7 +9,7 @@ eg.RegisterPlugin(
 )
 
 
-#import
+# import
 import socket
 from select import select
 from threading import Event, Thread, RLock
@@ -17,7 +17,6 @@ from time import sleep, clock
 
 
 class Amp(eg.PluginBase):
-
     def __init__(self):
 
         #actions
@@ -46,11 +45,13 @@ class Amp(eg.PluginBase):
         group_Vol.AddAction(NightModeIfNoStadiumMode)
         group_Vol.AddAction(SwitchBetweenNormalAndNightAudioMode)
 
-        group_Other = self.AddGroup("Other", "Other Stuff like Reading the display, calling Favourites, setting the display's brightness, etc.")
+        group_Other = self.AddGroup("Other",
+                                    "Other Stuff like Reading the display, calling Favourites, setting the display's brightness, etc.")
         group_Other.AddAction(PrintCurrentParameters)
         group_Other.AddAction(ReadAmpDisplay)
         group_Other.AddAction(Favourite)
         group_Other.AddAction(setDisplayBrightness)
+
 
 
         #available commands
@@ -95,10 +96,10 @@ class Amp(eg.PluginBase):
 
             ('CLK', "toggle Clock"),
 
-            ('FV$$', "Favourite %s"),
+            ('FV $$', "Favourite %s"),
             ('FVMEM [0-9][0-9]', "Set to Favourite %s"),
             ('FVDEL [0-9][0-9]', "Delete Favourite %s"),
-            ('FV?', "Request Favourite List"),
+            ('FV ?', "Request Favourite List"),
 
             ('PSBAS UP', "Bass Up"),
             ('PSBAS DOWN', "Bass Down"),
@@ -121,7 +122,15 @@ class Amp(eg.PluginBase):
         ]
         self.commands_strings = [entry[0] for entry in self.commands]
 
-    def __start__(self, myString_test, IP_str):
+    def __start__(self, myString_test,
+                  IP_str,
+                  Input_str1,
+                  Input_str2,
+                  Input_str3,
+                  Input_str4,
+                  Input_str5,
+                  Input_str6,
+                  Input_str7):
         print "starting" + myString_test
 
         #set the configuration variables
@@ -137,19 +146,30 @@ class Amp(eg.PluginBase):
             "Treble": None,
             "Bass": None,
             "Balance": None,
-            "Timer": (None, None), #(once, every)
+            "Timer": (None, None),  #(once, every)
             "DynamicBassBoost": None,
             "Sleep": None,
-            "AudioMode": None,   # 0 is Normal, 1 is Night, 2 is Stadium
+            "AudioMode": None,  # 0 is Normal, 1 is Night, 2 is Stadium
             "ConnectStatus": 0,
-            "Display": [""]*9
+            "Display": [""] * 9
+        }
+
+        # Names for Inputs (for outputting)
+        self.InputNames = {
+            "Internet Radio": Input_str1,
+            "Bluetooth": Input_str2,
+            "Server": Input_str3,
+            "USB": Input_str4,
+            "Rear USB": Input_str5,
+            "Digital In": Input_str6,
+            "Analog In": Input_str7
         }
 
         # a dictionary for values which cannot be set at the moment of the command, because the amplifier is switched off
         self.remember = {}
 
+        # connect to the application
         self.start_connection()
-
 
     def __stop__(self):
         print "stopping plugin"
@@ -190,17 +210,50 @@ class Amp(eg.PluginBase):
         self.status_variables["ConnectStatus"] = 0
         print "done"
 
-    def Configure(self, myString_test="", IP_str="192.168.1.197"):
-        panel = eg.ConfigPanel()
-        textControl = wx.TextCtrl(panel, -1, myString_test)
-        IP_str_Control2 = wx.TextCtrl(panel, -1, IP_str)
+    def Configure(self, myString_test="",
+                  IP_str="192.168.1.197",
+                  Input_str1="Internet Radio",
+                  Input_str2="Bluetooth",
+                  Input_str3="Server",
+                  Input_str4="USB",
+                  Input_str5="Rear USB",
+                  Input_str6="Digital In",
+                  Input_str7="Analog In"):
 
-        panel.AddLine("Starting string ",textControl)
-        panel.AddLine("IP address of Amplifier: ",IP_str_Control2)
+
+        panel = eg.ConfigPanel()
+
+        textControl = panel.TextCtrl(myString_test)
+        IP_str_Control2 = panel.TextCtrl(IP_str)
+        Input_str1_Ctrl = panel.TextCtrl(Input_str1)
+        Input_str2_Ctrl = panel.TextCtrl(Input_str2)
+        Input_str3_Ctrl = panel.TextCtrl(Input_str3)
+        Input_str4_Ctrl = panel.TextCtrl(Input_str4)
+        Input_str5_Ctrl = panel.TextCtrl(Input_str5)
+        Input_str6_Ctrl = panel.TextCtrl(Input_str6)
+        Input_str7_Ctrl = panel.TextCtrl(Input_str7)
+
+        panel.AddLine("Starting string ", textControl)
+        panel.AddLine("IP address of Amplifier: ", IP_str_Control2)
+        panel.AddLine("Customised Names for the various Inputs:")
+        panel.AddLine("Internet Radio: ", Input_str1_Ctrl)
+        panel.AddLine("Bluetooth: ", Input_str2_Ctrl)
+        panel.AddLine("Server: ", Input_str3_Ctrl)
+        panel.AddLine("USB: ", Input_str4_Ctrl)
+        panel.AddLine("Rear USB: ", Input_str5_Ctrl)
+        panel.AddLine("Digital In: ", Input_str6_Ctrl)
+        panel.AddLine("Analog In: ", Input_str7_Ctrl)
 
         while panel.Affirmed():
             panel.SetResult(textControl.GetValue(),
-                IP_str_Control2.GetValue()
+                IP_str_Control2.GetValue(),
+                Input_str1_Ctrl.GetValue(),
+                Input_str2_Ctrl.GetValue(),
+                Input_str3_Ctrl.GetValue(),
+                Input_str4_Ctrl.GetValue(),
+                Input_str5_Ctrl.GetValue(),
+                Input_str6_Ctrl.GetValue(),
+                Input_str7_Ctrl.GetValue()
             )
 
     def ThreadLoop(self, stopThreadEvent):
@@ -215,7 +268,7 @@ class Amp(eg.PluginBase):
                 receive_data = receive_data.split("\r")
                 for msg in receive_data:
                     if not msg:
-                        continue #only messages with content
+                        continue  #only messages with content
                     self.handle_rcv_content(msg)
             else:
                 self.sockLock.release()
@@ -241,14 +294,15 @@ class Amp(eg.PluginBase):
                 receive_data = receive_data.split("\r")
                 for msg in receive_data:
                     if not msg:
-                        continue #only messages with content
+                        continue  #only messages with content
                     self.handle_rcv_content(msg)
                     print msg
                     n_responses += 1
                 if n_responses >= exp_nb_responses:
                     break
             sleep(0.07)
-        sleep(0.01)     #TODO: test why this sleep statement is necessary (so that all messages get received through this fct, instead of the thread
+        sleep(0.01)
+        #TODO: test why this sleep statement is necessary (so that all messages get received through this fct, instead of the thread
 
     def handle_rcv_content(self, msg):
         print msg
@@ -280,19 +334,19 @@ class Amp(eg.PluginBase):
 
         elif msg.startswith("SI"):
             if msg == "SIIRADIO":
-                self.status_variables["Input"] = "Internet Radio"
+                self.status_variables["Input"] = self.InputNames["Internet Radio"]
             elif msg == "SIBLUETOOTH":
-                self.status_variables["Input"] = "Bluetooth"
+                self.status_variables["Input"] = self.InputNames["Bluetooth"]
             elif msg == "SISERVER":
-                self.status_variables["Input"] = "Server"
+                self.status_variables["Input"] = self.InputNames["Server"]
             elif msg == "SIUSB":
-                self.status_variables["Input"] = "USB"
+                self.status_variables["Input"] = self.InputNames["USB"]
             elif msg == "SIREARUSB":
-                self.status_variables["Input"] = "Rear USB"
+                self.status_variables["Input"] = self.InputNames["Rear USB"]
             elif msg == "SIDIGITALIN1":
-                self.status_variables["Input"] = "MP Lounge"
+                self.status_variables["Input"] = self.InputNames["Digital In"]
             elif msg == "SIANALOGIN":
-                self.status_variables["Input"] = "Analog In"
+                self.status_variables["Input"] = self.InputNames["Analog In"]
             #trigger Event
             self.TriggerEvent("Input", payload=self.status_variables["Input"])
 
@@ -345,7 +399,7 @@ class Amp(eg.PluginBase):
             self.sock.sendall(b'PSBAL ?\r')
             self.sock.sendall(b'PSSDB ?\r')
             self.sock.sendall(b'SLP?\r')
-            self.sock.sendall(b'TS?\r') #TODO: Check Timer request command
+            self.sock.sendall(b'TS?\r')  #TODO: Check Timer request command
             self.sock.sendall(b'NSE\r')
 
     def activateAudioMode(self, mode):
@@ -355,9 +409,9 @@ class Amp(eg.PluginBase):
             if not self.status_variables["Power"]:
                 self.remember["AudioMode"] = mode
                 #trigger Event
-                self.TriggerEvent("AudioMode", payload="R"+str(mode))
+                self.TriggerEvent("AudioMode", payload="R" + str(mode))
             else:
-                if mode == 0:   #normal
+                if mode == 0:  #normal
                     with self.sockLock:
                         self.sock.sendall(b'PSSDI ON\r')
                         self.sock.sendall(b'SSDIM100\r')
@@ -367,7 +421,7 @@ class Amp(eg.PluginBase):
                         self.sock.sendall(b'PSSDB OFF\r')
                     self.status_variables["AudioMode"] = 0
 
-                elif mode == 1:     #night
+                elif mode == 1:  #night
                     with self.sockLock:
                         self.sock.sendall(b'PSSDI OFF\r')
                         self.sock.sendall(b'PSBAS 40\r')
@@ -375,7 +429,7 @@ class Amp(eg.PluginBase):
                         self.sock.sendall(b'SSDIM050\r')
                     self.status_variables["AudioMode"] = 1
 
-                elif mode == 2:     #stadium
+                elif mode == 2:  #stadium
                     with self.sockLock:
                         self.sock.sendall(b'PSSDI OFF\r')
                         self.sock.sendall(b'PSBAS 52\r')
@@ -407,7 +461,7 @@ class Amp(eg.PluginBase):
 #
 class ConnectToAmp(eg.ActionBase):
     def __call__(self):
-        sleep(5)       #seems to work with 10seconds
+        sleep(5)  #seems to work with 10seconds
         self.plugin.start_connection()
 
 
@@ -441,11 +495,14 @@ class PowerOff(eg.ActionBase):
 
 
 class MakeAmpReadyForMP(eg.ActionBase):
+    name = "Make Amp Ready For Digital In"
+    description = "If needed, switch amplifier on and choose Digital In as Input"
+
     def __call__(self):
         if not self.plugin.status_variables["Power"]:
             self.plugin.sendCommand(b'PWON\r')
             sleep(4)
-        if not self.plugin.status_variables["Input"] == "MP Lounge":
+        if not self.plugin.status_variables["Input"] == self.plugin.InputNames["Digital In"]:
             self.plugin.sendCommand(b'SIDIGITALIN1\r')
 
 
@@ -455,8 +512,9 @@ class MakeAmpReadyForMP(eg.ActionBase):
 class setVolumeTo(eg.ActionBase):
     name = "Set Volume Level"
     description = "Set the volume level to a specified value"
+
     def __call__(self, VolumeLevel):
-        cmd_str = b'MV%02d\r' %VolumeLevel
+        cmd_str = b'MV%02d\r' % VolumeLevel
         self.plugin.sendCommand(cmd_str)
 
     def Configure(self, VolumeLevel=10):
@@ -467,10 +525,10 @@ class setVolumeTo(eg.ActionBase):
             panel.SetResult(VolumeLevelCtrl.GetValue())
 
 
-
 class VolUp(eg.ActionBase):
     name = "Volume up"
     description = "Increase volume by one step"
+
     def __call__(self):
         self.plugin.sendCommand(b'MVUP\r')
 
@@ -478,6 +536,7 @@ class VolUp(eg.ActionBase):
 class VolDown(eg.ActionBase):
     name = "Volume down"
     description = "Decrease volume by one step"
+
     def __call__(self):
         self.plugin.sendCommand(b'MVDOWN\r')
 
@@ -485,6 +544,7 @@ class VolDown(eg.ActionBase):
 class NormalMode(eg.ActionBase):
     name = "Normal AudioMode"
     description = "Source Direct Input = True, Bass & Treble = default"
+
     def __call__(self):
         self.plugin.activateAudioMode(0)
 
@@ -492,6 +552,7 @@ class NormalMode(eg.ActionBase):
 class NightMode(eg.ActionBase):
     name = "Night AudioMode"
     description = "cut bass out"
+
     def __call__(self):
         self.plugin.activateAudioMode(1)
 
@@ -499,6 +560,7 @@ class NightMode(eg.ActionBase):
 class StadiumMode(eg.ActionBase):
     name = "Stadium AudioMode"
     description = "push bass and treble"
+
     def __call__(self):
         self.plugin.activateAudioMode(2)
 
@@ -618,7 +680,7 @@ class Favourite(eg.ActionBase):
     description = "Go to a specified Favourite"
 
     def __call__(self, favouriteNb):
-        cmd_str = b'FV %02d\r' %favouriteNb
+        cmd_str = b'FV %02d\r' % favouriteNb
         self.plugin.sendCommand(cmd_str)
 
     def Configure(self, favouriteNb=1):
@@ -629,7 +691,6 @@ class Favourite(eg.ActionBase):
             panel.SetResult(favouriteNbCtrl.GetValue())
 
 
-
 #
 # Read Amp's Display
 #
@@ -638,8 +699,8 @@ class ReadAmpDisplay(eg.ActionBase):
         self.plugin.sendCommand(b'NSE\r')
         sleep(1)
 
-        if self.plugin.status_variables["Input"] == "MP Lounge":
-            display_output = "Input: MP Lounge"
+        if self.plugin.status_variables["Input"] == self.plugin.InputNames["Digital In"]:
+            display_output = "Input: " + self.plugin.InputNames["Digital In"]
         else:
             display_output_list = [line.strip() for line in self.plugin.status_variables["Display"] if (line.strip())]
 
@@ -651,7 +712,7 @@ class ReadAmpDisplay(eg.ActionBase):
             display_output = ""
             for line in display_output_list:
                 display_output += line + "\n"
-            display_output = display_output[0:len(display_output)-1] #remove the last "\n"
+            display_output = display_output[0:len(display_output) - 1]  #remove the last "\n"
 
         self.plugin.TriggerEvent("Display", payload=display_output)
 
@@ -667,7 +728,7 @@ class setDisplayBrightness(eg.ActionBase):
     description = "Set the brightness of the display to a specified value"
 
     def __call__(self, brightness_pct):
-        cmd_str = b'SSDIM%03d\r' %brightness_pct
+        cmd_str = b'SSDIM%03d\r' % brightness_pct
         self.plugin.sendCommand(cmd_str)
 
     def Configure(self, brightness_pct=100):
@@ -704,4 +765,4 @@ class setDisplayBrightness(eg.ActionBase):
 
 #### general todos or notes #####
 #TODO: another thread which checks the connection to the amp every hour or so. If it is broken, then restart connection
-
+#TODO: instead of having string in the status_variables dict, use global variables (like INPUT_DIGITALIN = 1) and only use the strings for output
