@@ -24,7 +24,7 @@ import eg
 eg.RegisterPlugin(
     name="Marantz M-CR511",
     author="Kevin Smith",
-    version="0.0.13",
+    version="0.0.14",
     kind="external",
     description='Control the Marantz M-CR511 (and M-CR611) amplifier via the TCP/IP control protocol. \n \n \
     The plugin should also work for the previous models M-CR510/610, as well as other amplifiers \n \
@@ -144,8 +144,7 @@ class Amp(eg.PluginBase):
         ]
         self.commands_strings = [entry[0] for entry in self.commands]
 
-    def __start__(self, myString_test,
-                  IP_str,
+    def __start__(self, IP_str,
                   Input_str1,
                   Input_str2,
                   Input_str3,
@@ -153,7 +152,7 @@ class Amp(eg.PluginBase):
                   Input_str5,
                   Input_str6,
                   Input_str7):
-        print "starting" + myString_test
+        print "starting"
 
         #set the configuration variables
         self.HOST = IP_str
@@ -232,8 +231,7 @@ class Amp(eg.PluginBase):
         self.status_variables["ConnectStatus"] = 0
         print "done"
 
-    def Configure(self, myString_test="",
-                  IP_str="192.168.1.197",
+    def Configure(self, IP_str="192.168.1.197",
                   Input_str1="Internet Radio",
                   Input_str2="Bluetooth",
                   Input_str3="Server",
@@ -245,7 +243,6 @@ class Amp(eg.PluginBase):
 
         panel = eg.ConfigPanel()
 
-        textControl = panel.TextCtrl(myString_test)
         IP_str_Control2 = panel.TextCtrl(IP_str)
         Input_str1_Ctrl = panel.TextCtrl(Input_str1)
         Input_str2_Ctrl = panel.TextCtrl(Input_str2)
@@ -255,7 +252,6 @@ class Amp(eg.PluginBase):
         Input_str6_Ctrl = panel.TextCtrl(Input_str6)
         Input_str7_Ctrl = panel.TextCtrl(Input_str7)
 
-        panel.AddLine("Starting string ", textControl)
         panel.AddLine("IP address of Amplifier: ", IP_str_Control2)
         panel.AddLine("Customised Names for the various Inputs:")
         panel.AddLine("Internet Radio: ", Input_str1_Ctrl)
@@ -267,8 +263,7 @@ class Amp(eg.PluginBase):
         panel.AddLine("Analog In: ", Input_str7_Ctrl)
 
         while panel.Affirmed():
-            panel.SetResult(textControl.GetValue(),
-                IP_str_Control2.GetValue(),
+            panel.SetResult(IP_str_Control2.GetValue(),
                 Input_str1_Ctrl.GetValue(),
                 Input_str2_Ctrl.GetValue(),
                 Input_str3_Ctrl.GetValue(),
