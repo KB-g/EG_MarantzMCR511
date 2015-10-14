@@ -1,8 +1,8 @@
 
 # This file is part of an Eventghost plugin to control the Marantz M-CR511 amplifier.
 # This plugin was developed by using the specification of the
-# TCP/IP control protocol of the Marantz M-CR511 Receiver. Marantz
-# was not involved in developing this plugin.
+# TCP/IP control protocol of the Marantz M-CR511 Receiver provided by Marantz.
+# Marantz was not involved in the development this plugin.
 # Copyright (C) 2015  Kevin Smith <smith.kb@hotmail.com>
 #
 # This program is free software; you can redistribute it and/or modify
@@ -84,7 +84,7 @@ class Amp(eg.PluginBase):
 
         #available commands
         #TODO: Try out Favourites and request Favourites List
-        self.commands = [
+        self.available_commands = [
             ('PWON', "Power On"),
             ('PWOFF', "Power Off"),
             ('PW?', "Request Power Status"),
