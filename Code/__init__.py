@@ -46,10 +46,11 @@ class Amp(eg.PluginBase):
         group_Connection.AddAction(ConnectToAmp)
         group_Connection.AddAction(DisconnectFromAmp)
 
-        group_TimerClock = self.AddGroup("Timer & Clock", "Set Timer, switch it On/Off and show the Clock")
+        group_TimerClock = self.AddGroup("Timer, Clock & Sleep", "Set Timer, switch it On/Off and show the Clock")
         group_TimerClock.AddAction(TimerOn)
         group_TimerClock.AddAction(TimerOff)
         group_TimerClock.AddAction(Clock)
+        group_TimerClock.AddAction(setSleep)
 
         group_Power = self.AddGroup("Power", "Actions regarding the Power State of the amplifier")
         group_Power.AddAction(PowerOn)
@@ -60,12 +61,14 @@ class Amp(eg.PluginBase):
         group_Vol.AddAction(setVolumeTo)
         group_Vol.AddAction(VolUp)
         group_Vol.AddAction(VolDown)
+        group_Vol.AddAction(VolPct)
+        group_Vol.AddAction(gradualVolChange)
+        group_Vol.AddAction(stopGradualVolChange)
         group_Vol.AddAction(NormalMode)
         group_Vol.AddAction(StadiumMode)
         group_Vol.AddAction(NightMode)
         group_Vol.AddAction(NextAudioMode)
         group_Vol.AddAction(NightModeIfNoStadiumMode)
-        group_Vol.AddAction(SwitchBetweenNormalAndNightAudioMode)
 
         group_Other = self.AddGroup("Other",
                                     "Other Stuff like Reading the display, calling Favourites, setting the display's brightness, etc.")
@@ -73,6 +76,9 @@ class Amp(eg.PluginBase):
         group_Other.AddAction(ReadAmpDisplay)
         group_Other.AddAction(Favourite)
         group_Other.AddAction(setDisplayBrightness)
+        group_Other.AddAction(sendCustomCommand)
+
+
 
 
 
@@ -199,6 +205,12 @@ class Amp(eg.PluginBase):
     def __close__(self):
         print "closing plugin"
 
+    def OnComputerSuspend(self):
+        self.stop_connection()
+
+    def OnComputerResume(self):
+        self.start_connection()
+
     def start_connection(self):
 
         #initiate the socket & lock
@@ -322,7 +334,7 @@ class Amp(eg.PluginBase):
         #TODO: test why this sleep statement is necessary (so that all messages get received through this fct, instead of the thread
 
     def handle_rcv_content(self, msg):
-        print msg
+        #print msg
 
         if msg.startswith("MVVOA"):
             self.status_variables["Volume"] = int(msg[5:7])
@@ -469,6 +481,15 @@ class Amp(eg.PluginBase):
         with self.sockLock:
             self.sock.sendall(cmd)
 
+    def repeatCommandThread(self, stopRepeatingCommand, cmd_str, interval, nb_loops, end_event_string):
+        for loop_cur in range(nb_loops):
+            if stopRepeatingCommand.isSet():
+                break
+            self.sendCommand(cmd_str)
+            stopRepeatingCommand.wait(interval)
+        stopRepeatingCommand.set()
+        self.TriggerEvent(end_event_string)
+
 
 ###########
 ## Actions
@@ -557,6 +578,100 @@ class VolDown(eg.ActionBase):
 
     def __call__(self):
         self.plugin.sendCommand(b'MVDOWN\r')
+
+
+class VolPct(eg.ActionBase):
+    name = "Volume Pct"
+    description = "Increase/Decrease volume by a percentage amount of the current volume"
+
+    def __call__(self, incDec, pctChange):
+        newVolume = round(float(self.plugin.status_variables["Volume"]) * (1 + float(pctChange) / 100. * (incDec-0.5)*2))
+        newVolume = int(min(60, newVolume))
+        print newVolume
+        cmd_str = b'MV%0d\r' % newVolume
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, incDec=0, pctChange=0):
+        panel = eg.ConfigPanel()
+        incDec_Ctrl = panel.Choice(incDec, choices=("decrease", "increase"))
+        pctChangeCtrl = panel.SpinIntCtrl(pctChange, max=200)
+
+        panel.AddLine(incDec_Ctrl, " by ", pctChangeCtrl, "%")
+        while panel.Affirmed():
+            panel.SetResult(incDec_Ctrl.GetValue(),
+                pctChangeCtrl.GetValue())
+
+
+class gradualVolChange(eg.ActionBase):
+    def __call__(self, endVol, interval, up_down_both):
+        #if there is a gradualVol_thread already running, cancel it
+        if hasattr(self.plugin, 'stopGradualVolChange'):
+            self.plugin.stopGradualVolChange.set()
+            sleep(0.2)
+
+        curVol = self.plugin.status_variables["Volume"]
+
+        #set the cmd_str and nb of loops according to the up_down_both parameter
+        if up_down_both == 0:
+            nb_loops = max(endVol - curVol, 0)
+            cmd_str = b'MVUP\r'
+        elif up_down_both == 1:
+            nb_loops = max(curVol - endVol, 0)
+            cmd_str = b'MVDOWN\r'
+        else:
+            if curVol > endVol:
+                cmd_str = b'MVDOWN\r'
+            else:
+                cmd_str = b'MVUP\r'
+            nb_loops = abs(curVol - endVol)
+
+        interval = max(interval, 0.2)  #'make sure the interval is at least 200msec'
+        end_event_string = "GradualVolChange.Finished"
+
+        self.plugin.stopGradualVolChange = Event()
+        self.plugin.gradualVol_thread = Thread(
+            target=self.plugin.repeatCommandThread,
+            args=(self.plugin.stopGradualVolChange,
+                  cmd_str,
+                  interval,
+                  nb_loops,
+                  end_event_string)
+        )
+        self.plugin.gradualVol_thread.start()
+        print "gradually changing volume from %0d to %0d using %0dsec intervals" % (curVol, endVol, interval)
+
+    def Configure(self, endVol=10, interval=5, up_down_both=2):
+        panel = eg.ConfigPanel()
+        endVol_Ctrl = panel.SpinIntCtrl(endVol, max=60)
+        interval_Ctrl = panel.SpinIntCtrl(interval, max=600)
+
+        up_down_both_Ctrl = panel.Choice(up_down_both, choices=("only from below", "only from above", "no matter what direction"))
+
+        panel.AddLine("Gradually change volume to: ", endVol_Ctrl)
+        panel.AddLine("Change volume by 1 step every: ", interval_Ctrl, "sec.")
+        panel.AddLine("Direction: ", up_down_both_Ctrl)
+
+
+        while panel.Affirmed():
+            panel.SetResult(endVol_Ctrl.GetValue(),
+                interval_Ctrl.GetValue(),
+                up_down_both_Ctrl.GetValue()
+            )
+
+
+class stopGradualVolChange(eg.ActionBase):
+    def __call__(self):
+        if hasattr(self.plugin, 'stopGradualVolChange'):
+            self.plugin.stopGradualVolChange.set()
+            sleep(0.2)
+
+
+
+
+
+
+
+
 
 
 class NormalMode(eg.ActionBase):
@@ -690,6 +805,25 @@ class Clock(eg.ActionBase):
         self.plugin.sendCommand(b'CLK\r')
 
 
+class setSleep(eg.ActionBase):
+    name = "Set sleep"
+    description = "Set the sleep mode of the amplifier"
+
+    def __call__(self, sleep_min):
+        if sleep_min == 0:
+            cmd_str = b'SLPOFF\r'
+        else:
+            cmd_str = b'SLP%03d\r' % sleep_min
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, sleep_min=0):
+        panel = eg.ConfigPanel()
+        sleep_minCtrl = panel.SpinIntCtrl(sleep_min, max=90)
+        panel.AddLine("Sleep time:", sleep_minCtrl, "min")
+        while panel.Affirmed():
+            panel.SetResult(sleep_minCtrl.GetValue())
+
+
 #
 # Favourites
 #
@@ -742,7 +876,7 @@ class PrintCurrentParameters(eg.ActionBase):
 
 
 class setDisplayBrightness(eg.ActionBase):
-    name = "Set Display Brithness"
+    name = "Set Display Brightness"
     description = "Set the brightness of the display to a specified value"
 
     def __call__(self, brightness_pct):
@@ -757,31 +891,27 @@ class setDisplayBrightness(eg.ActionBase):
             panel.SetResult(brightness_pctCtrl.GetValue())
 
 
-# class testing(eg.ActionBase):
-#     def __call__(self, method, port):
-#         print method, " ", port
-#
-#     # def Configure(self, universalMods = True):
-#     #     panel = eg.ConfigPanel()
-#     #     universalModsCtrl = panel.CheckBox(universalMods, "checking")
-#     #     #panel.sizer.Add(universalModsCtrl, 0, wx.ALL, 20)
-#     #     panel.AddLine("test", universalModsCtrl)
-#     #     while panel.Affirmed():
-#     #         panel.SetResult(universalModsCtrl.GetValue())
-#
-#     def Configure(self, method=0):
-#
-#         panel = eg.ConfigPanel(self)
-#         methodCtrl = panel.Choice(method, choices=("Via MarantzControl", "Directly to serial port"))
-#         panel.AddLine("Method:", methodCtrl)
-#
-#         while panel.Affirmed():
-#             panel.SetResult(methodCtrl.GetValue())
+class sendCustomCommand(eg.ActionBase):
+    name = "send custom command"
+    description = "Send any specified command to the amplifier. The <CR> is automatically added at the end."
 
+    def __call__(self, cmd_str_raw):
+        cmd_str = cmd_str_raw + "\r"
+        self.plugin.sendCommand(cmd_str)
+
+    def Configure(self, cmd_str_raw="PWON"):
+        panel = eg.ConfigPanel()
+        cmd_str_rawCtrl = panel.TextCtrl(cmd_str_raw)
+        panel.AddLine("Command (without <CR>):", cmd_str_rawCtrl)
+        while panel.Affirmed():
+            panel.SetResult(cmd_str_rawCtrl.GetValue())
 
 
 
 #### general todos or notes #####
 #TODO: another thread which checks the connection to the amp every hour or so. If it is broken, then restart connection
 #TODO: instead of having string in the status_variables dict, use global variables (like INPUT_DIGITALIN = 1) and only use the strings for output
-#TODO: new action which increases the volume in percentage terms (e.g. reduce by 30%) --> useful for phone calls or similar
+#TODO: toggle Power
+#TODO: make the Audio Modes configurable (and also gradually fade into them?)
+#TODO: action: request Favourites list
+#TODO: gradual Vol change: less than a second
