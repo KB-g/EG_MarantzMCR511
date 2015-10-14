@@ -83,7 +83,6 @@ class Amp(eg.PluginBase):
 
 
         #available commands
-        #TODO: Try out Favourites and request Favourites List
         self.available_commands = [
             ('PWON', "Power On"),
             ('PWOFF', "Power Off"),
@@ -331,7 +330,6 @@ class Amp(eg.PluginBase):
                     break
             sleep(0.07)
         sleep(0.01)
-        #TODO: test why this sleep statement is necessary (so that all messages get received through this fct, instead of the thread
 
     def handle_rcv_content(self, msg):
         #print msg
@@ -906,12 +904,3 @@ class sendCustomCommand(eg.ActionBase):
         while panel.Affirmed():
             panel.SetResult(cmd_str_rawCtrl.GetValue())
 
-
-
-#### general todos or notes #####
-#TODO: another thread which checks the connection to the amp every hour or so. If it is broken, then restart connection
-#TODO: instead of having string in the status_variables dict, use global variables (like INPUT_DIGITALIN = 1) and only use the strings for output
-#TODO: toggle Power
-#TODO: make the Audio Modes configurable (and also gradually fade into them?)
-#TODO: action: request Favourites list
-#TODO: gradual Vol change: less than a second
