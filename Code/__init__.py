@@ -24,7 +24,7 @@ import eg
 eg.RegisterPlugin(
     name="Marantz M-CR511",
     author="Kevin Smith",
-    version="0.0.14",
+    version="0.1.0",
     kind="external",
     description='Control the Marantz M-CR511 (and M-CR611) amplifier via the TCP/IP control protocol. \n \n \
     The plugin should also work for the previous models M-CR510/610, as well as other amplifiers \n \
