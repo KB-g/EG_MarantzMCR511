@@ -147,7 +147,6 @@ class Amp(eg.PluginBase):
             ('PSSDI OFF', "Source Direct Off"),
             ('PSSDI ?', "Request Source Direct Status")
         ]
-        self.commands_strings = [entry[0] for entry in self.commands]
 
     def __start__(self, IP_str,
                   Input_str1,
